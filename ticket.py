@@ -2,6 +2,7 @@
 import requests
 import json
 import re
+import qrcode
 import prettytable as pt
 
 
@@ -18,6 +19,7 @@ class ticket:
         self.query_url = ''
         self.login_url = ''
         self.jsessionid = ''
+        self.uuid = ''
 
     def get_station_code(self):
         url = 'https://www.12306.cn/index/script/core/common/station_name_v10178.js'
@@ -38,11 +40,7 @@ class ticket:
 
     def get_index_login_conf(self):
         url = 'https://www.12306.cn/index/otn/login/conf'
-        headers = {
-            'ContentType':'application/json;charset=UTF-8',
-            'User-Agent':self.headers['User-Agent']
-        }
-        resp = self.session.post(url, headers=headers)
+        resp = self.session.post(url, headers=self.headers)
         resp.encoding = 'utf-8'
         dic = json.loads(resp.text)
 
@@ -60,7 +58,6 @@ class ticket:
             'purpose_codes':self.purpose_codes
         }
         headers = {
-            'ContentType':'application/json;charset=UTF-8',
             'User-Agent':self.headers['User-Agent'],
             'Cookie':'JSESSIONID=' + self.jsessionid
         }
@@ -93,9 +90,28 @@ class ticket:
             ])
         print(tb)
 
+    def gen_qrcode(self):
+        url = 'https://kyfw.12306.cn/passport/web/create-qr64'
+        params = {
+            'appid':'otn'
+        }
+        resp = self.session.post(url, params=params, headers=self.headers)
+        resp.encoding = 'utf-8'
+        dic = json.loads(resp.text)
+
+        self.uuid = dic['uuid']
+        print('uuid:', self.uuid)
+
+        qr = qrcode.QRCode(error_correction=qrcode.ERROR_CORRECT_L, box_size=5, border=2)
+        qr.add_data(dic['image'])
+        # qr.print_ascii(invert=False)
+        qr.make_image().show() # pip3 install image
+        print('get qrcode success, please scan')
+
 
 if __name__ == '__main__':
     ticket_object = ticket('杭州', '信阳', '2022-09-01')
     ticket_object.get_station_code()
     ticket_object.get_index_login_conf()
     ticket_object.query_left_ticket()
+    ticket_object.gen_qrcode()
