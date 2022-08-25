@@ -1,20 +1,25 @@
 # -*- coding: utf-8 -*-
 import requests
 import json
+import re
 import prettytable as pt
 
 
 class ticket:
-    def __init__(self):
+    def __init__(self, from_station_name, to_station_name, train_date, purpose_codes='ADULT'):
         self.headers = {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.135 Safari/537.36'}
         self.session = requests.Session()
+        self.from_station_name = from_station_name
+        self.to_station_name = to_station_name
+        self.train_date = train_date
+        self.purpose_codes = purpose_codes
         self.from_station_code = ''
         self.to_station_code = ''
         self.query_url = ''
         self.login_url = ''
-        self.cookie = ''
+        self.jsessionid = ''
 
-    def __get_station_code(self):
+    def get_station_code(self):
         url = 'https://www.12306.cn/index/script/core/common/station_name_v10178.js'
         resp = self.session.get(url, headers=self.headers)
 
@@ -31,7 +36,7 @@ class ticket:
         print('from_station:', self.from_station_name + ' - ' + self.from_station_code) # 杭州 - HZH
         print('to_station:', self.to_station_name + ' - ' + self.to_station_code)       # 信阳 - XUN
 
-    def __get_login_conf(self):
+    def get_index_login_conf(self):
         url = 'https://www.12306.cn/index/otn/login/conf'
         headers = {
             'ContentType':'application/json;charset=UTF-8',
@@ -42,21 +47,11 @@ class ticket:
         dic = json.loads(resp.text)
 
         self.query_url = dic['data']['queryUrl']
-        self.login_url = dic['data']['login_url']
-        self.cookie = resp.headers.get('Set-Cookie')
-        print('queryUrl:', dic['data']['queryUrl'])     # leftTicket/query
-        print('login_url:', dic['data']['login_url'])   # resources/login.html
-        print('cookie:', self.cookie) # route, JSESSIONID, BIGipServerotn, BIGipServerpool_index
+        self.jsessionid = re.search(r'(.*)JSESSIONID=(.*?);', resp.headers.get('Set-Cookie')).group(2)
+        print('query_url:', dic['data']['queryUrl']) # leftTicket/query
+        print('jsessionid:', self.jsessionid)        # 68F423A7858C3C22FA617AAA5D4EAA7E
 
-    def query_left_ticket(self, from_station_name, to_station_name, train_date, purpose_codes='ADULT'):
-        self.from_station_name = from_station_name
-        self.to_station_name = to_station_name
-        self.train_date = train_date
-        self.purpose_codes = purpose_codes
-
-        self.__get_station_code()
-        self.__get_login_conf()
-
+    def query_left_ticket(self):
         url = 'https://kyfw.12306.cn/otn/' + self.query_url
         params = {
             'leftTicketDTO.train_date':self.train_date,
@@ -67,7 +62,7 @@ class ticket:
         headers = {
             'ContentType':'application/json;charset=UTF-8',
             'User-Agent':self.headers['User-Agent'],
-            'Cookie':self.cookie
+            'Cookie':'JSESSIONID=' + self.jsessionid
         }
         resp = self.session.get(url, params=params, headers=headers)
         resp.encoding = 'utf-8'
@@ -99,7 +94,8 @@ class ticket:
         print(tb)
 
 
-
 if __name__ == '__main__':
-    ticket_object = ticket()
-    ticket_object.query_left_ticket('杭州', '信阳', '2022-09-01')
+    ticket_object = ticket('杭州', '信阳', '2022-09-01')
+    ticket_object.get_station_code()
+    ticket_object.get_index_login_conf()
+    ticket_object.query_left_ticket()
