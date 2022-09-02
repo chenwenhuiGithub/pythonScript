@@ -13,14 +13,14 @@ import qrcode
 import requests
 
 
-def get_timestamp():
+def get_timestamp_ms():
     return int(time.time() * 1000)
 
 def get_rtimestamp():
     return -int(time.time())
 
 def get_msgid():
-    return str(get_timestamp()) + str(random.random())[2:6]
+    return str(get_timestamp_ms()) + str(random.random())[2:6]
 
 def get_md5(file_name):
     with open(file_name, mode='rb') as fptr:
@@ -29,18 +29,17 @@ def get_md5(file_name):
 
 
 class webwx:
-    def __init__(self, proxies=None):
-        self.headers = { 'User-Agent':'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.135 Safari/537.36' }    
-        self.proxies = proxies
+    def __init__(self, proxies={}):
         self.session = requests.Session()
+        self.session.headers = {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.135 Safari/537.36'}
+        self.session.proxies = proxies
         self.uuid = ''
         self.redirect_uri = ''
         self.skey = ''
-        self.sid = ''
-        self.uin = ''
+        self.wxsid = ''
+        self.wxuin = ''
         self.pass_ticket = ''
         self.device_id = 'e' + repr(random.random())[2:17]
-        self.base_request = {}
         self.sync_key = {}
         self.sync_key_str = ''
         self.account_self = {}
@@ -58,14 +57,14 @@ class webwx:
             'redirect_uri':'https://login.weixin.qq.com/cgi-bin/mmwebwx-bin/webwxnewloginpage',
             'fun':'new',
             'lang':'en_US',
-            '_':get_timestamp()
+            '_':get_timestamp_ms()
         }
-        resp = self.session.get(url, params=params, headers=self.headers, proxies=self.proxies)
+        resp = self.session.get(url, params=params)
         regx = r'window.QRLogin.code = (\d+); window.QRLogin.uuid = "(\S+?)";'
         data = re.search(regx, resp.text)
         if data.group(1) == '200':
             self.uuid = data.group(2)
-            print('get uuid success:%s' %self.uuid)
+            print('uuid:%s' %self.uuid)
         else:
             print('get uuid failed')
 
@@ -78,56 +77,52 @@ class webwx:
 
     def __login(self):
         url = 'https://login.wx.qq.com/cgi-bin/mmwebwx-bin/login'
-        tip = 1 # 0-scaned, 1-not scaned
+        tip = 1 # 0 - scaned, 1 - not scaned
 
         while True:
             params = {
                 'loginicon':'true',
                 'uuid':self.uuid,
                 'tip':tip,
-                'r':get_rtimestamp(),
-                '_':get_timestamp()
+                'r':get_rtimestamp(), # TODO: how to set r
+                '_':get_timestamp_ms()
             }
-            resp = self.session.get(url, params=params, headers=self.headers, proxies=self.proxies)
+            resp = self.session.get(url, params=params)
             data = re.search(r'window.code=(\d+)', resp.text)
-            if data.group(1) == '408': # timeout
+            if data.group(1) == '408':
                 tip = 1
-                print('login failed, scan timeout')
-            elif data.group(1) == '201': # scaned
+                print('qrcode scan timeout')
+            elif data.group(1) == '201':
                 tip = 0
-                print('scan success, logining...')
-            elif data.group(1) == '200': # success
+                print('qrcode scan success')
+            elif data.group(1) == '200':
                 param = re.search(r'window.redirect_uri="(\S+?)";', resp.text)
                 self.redirect_uri = param.group(1)
                 print('redirect_uri:%s' %self.redirect_uri)
+                print('qrcode login success')
                 return
             else:
-                print('login failed, unknown status:%s' %data.group(1))
+                print('qrcode scan failed, unknown status:%s' %data.group(1))
                 return
-            time.sleep(1)
+            time.sleep(2)
 
     def __get_params(self):
         url = self.redirect_uri + '&fun=new&version=v2'
-        resp = self.session.get(url, headers=self.headers, allow_redirects=False, proxies=self.proxies)
+        resp = self.session.get(url, allow_redirects=False)
         nodes = xml.dom.minidom.parseString(resp.text).documentElement.childNodes
         for node in nodes:
             if node.nodeName == 'skey':
                 self.skey = node.childNodes[0].data
-                self.base_request['Skey'] = self.skey
                 print('skey:%s' %self.skey)
             elif node.nodeName == 'wxsid':
-                self.sid = node.childNodes[0].data
-                self.base_request['Sid'] = self.sid
-                print('sid:%s' %self.sid)
+                self.wxsid = node.childNodes[0].data
+                print('wxsid:%s' %self.wxsid)
             elif node.nodeName == 'wxuin':
-                self.uin = node.childNodes[0].data
-                self.base_request['Uin'] = self.uin
-                print('uin:%s' %self.uin)
+                self.wxuin = node.childNodes[0].data
+                print('wxuin:%s' %self.wxuin)
             elif node.nodeName == 'pass_ticket':
                 self.pass_ticket = node.childNodes[0].data
                 print('pass_ticket:%s' %self.pass_ticket)
-        self.base_request['DeviceID'] = self.device_id
-        print('device_id:%s' %self.device_id)
 
     def __initinate(self):
         url = 'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxinit'
@@ -135,14 +130,15 @@ class webwx:
             'r':get_rtimestamp(),
             'pass_ticket':self.pass_ticket
         }
-        data = {
-            'BaseRequest':self.base_request
+        json_params = {
+            'BaseRequest':{
+                'Skey':self.skey,
+                'Sid':self.wxsid,
+                'Uin':self.wxuin,
+                'DeviceID':self.device_id
+            }
         }
-        headers = {
-            'ContentType':'application/json; charset=UTF-8',
-            'User-Agent':self.headers['User-Agent']
-        }
-        resp = self.session.post(url, params=params, data=json.dumps(data), headers=headers, proxies=self.proxies)
+        resp = self.session.post(url, params=params, json=json_params)
         resp.encoding = 'utf-8'
         dic = json.loads(resp.text)
         self.sync_key = dic['SyncKey']
@@ -157,96 +153,96 @@ class webwx:
         params = {
             'pass_ticket':self.pass_ticket
         }
-        self.base_request['Uin'] = int(self.base_request['Uin'])
-        data = {
-            'BaseRequest':self.base_request,
-            'ClientMsgId':get_timestamp(),
+        json_params = {
+            'BaseRequest':{
+                'Skey':self.skey,
+                'Sid':self.wxsid,
+                'Uin':int(self.wxuin),
+                'DeviceID':self.device_id
+            },
+            'ClientMsgId':get_timestamp_ms(),
             'Code':3,
             'FromUserName':self.account_self['UserName'],
             'ToUserName':self.account_self['UserName']
         }
-        headers = {
-            'ContentType':'application/json; charset=UTF-8',
-            'User-Agent':self.headers['User-Agent']
-        }
-        self.session.post(url, params=params, data=json.dumps(data), headers=headers, proxies=self.proxies)
+        self.session.post(url, params=params, json=json_params)
 
     def __get_contact(self):
         member_list = []
         url = 'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxgetcontact'
         params = {
             'pass_ticket':self.pass_ticket,
-            'r':get_timestamp(),
+            'r':get_timestamp_ms(),
             'seq':0,
             'skey':self.skey
         }
-        headers = {
-            'ContentType':'application/json; charset=UTF-8',
-            'User-Agent':self.headers['User-Agent']
-        }
-        resp = self.session.post(url, params=params, headers=headers, timeout=180, proxies=self.proxies)
+        resp = self.session.post(url, params=params, timeout=180)
         resp.encoding = 'utf-8'
         dic = json.loads(resp.text)
         member_list.extend(dic['MemberList'])
 
         while dic['Seq'] != 0:
             params['seq'] = dic['Seq']
-            resp = self.session.post(url, params=params, headers=headers, timeout=180, proxies=self.proxies)
+            resp = self.session.post(url, params=params, timeout=180)
             resp.encoding = 'utf-8'
             dic = json.loads(resp.text)
             member_list.extend(dic['MemberList'])
 
         for member in member_list:
-            if member['UserName'].find('@@') != -1:
+            if member['UserName'].startswith('@@'):
                 self.account_groups[member['UserName']] = member # not include detail members info
             elif member['VerifyFlag'] & 8 != 0:
-                self.account_subscriptions[member['UserName']] = member # include weixin,weixinzhifu
+                self.account_subscriptions[member['UserName']] = member
             else:
-                self.account_contacts[member['UserName']] = member # include filehelper
+                self.account_contacts[member['UserName']] = member
 
-        print('num subscriptions:%d' %len(self.account_subscriptions))
-        print('num groups:%d' %len(self.account_groups))
-        print('num contacts:%d' %len(self.account_contacts))
+        print('account_num_groups:%d' %len(self.account_groups))
+        print('account_num_subscriptions:%d' %len(self.account_subscriptions))
+        print('account_num_contacts:%d' %len(self.account_contacts))
 
     def __get_group_members(self):
+        grouplist = []
+        for group in self.account_groups.values():
+            grouplist.append({
+                'UserName':group['UserName'],
+                'ChatRoomId':'',
+                'EncryChatRoomId':''
+                })
+
         url = 'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxbatchgetcontact'
         params = {
             'type':'ex',
-            'r':get_timestamp(),
-            'lang':'en_US'
+            'r':get_timestamp_ms(),
+            'pass_ticket':self.pass_ticket
         }
-
-        grouplist = []
-        for group in self.account_groups.values():
-            grouplist.append({'UserName':group['UserName'], 'ChatRoomId':group['ChatRoomId']})
-
-        data = {
-            'BaseRequest':self.base_request,
-            'Count':len(self.account_groups),
+        json_params = {
+            'BaseRequest':{
+                'Skey':self.skey,
+                'Sid':self.wxsid,
+                'Uin':int(self.wxuin),
+                'DeviceID':self.device_id
+            },
+            'Count':len(grouplist),
             'List':grouplist
         }
-        headers = {
-            'ContentType':'application/json; charset=UTF-8',
-            'User-Agent':self.headers['User-Agent']
-        }
-        resp = self.session.post(url, params=params, data=json.dumps(data), headers=headers, timeout=180, proxies=self.proxies)
+        resp = self.session.post(url, params=params, json=json_params, timeout=180)
         resp.encoding = 'utf-8'
         dic = json.loads(resp.text)
         for member in dic['ContactList']:
-            self.account_groups_members[member['UserName']] = member # save group member list info
+            self.account_groups_members[member['UserName']] = member # include detail members info
 
     def __sync_check(self):
         url = 'https://webpush.wx.qq.com/cgi-bin/mmwebwx-bin/synccheck'
         params = {
-            'r':get_timestamp(),
+            'r':get_timestamp_ms(),
             'skey':self.skey,
-            'sid':self.sid,
-            'uin':self.uin,
+            'sid':self.wxsid,
+            'uin':self.wxuin,
             'deviceid':self.device_id,
             'synckey':self.sync_key_str,
-            '_':get_timestamp()
+            '_':get_timestamp_ms()
         }
-        resp = self.session.get(url, params=params, headers=self.headers, proxies=self.proxies)
+        resp = self.session.get(url, params=params)
         data = re.search(r'window.synccheck=\{retcode:"(\d+)",selector:"(\d+)"\}', resp.text)
         retcode = data.group(1)
         selector = data.group(2)
@@ -256,20 +252,21 @@ class webwx:
         msg_list = []
         url = 'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxsync'
         params = {
-            'sid':self.sid,
+            'sid':self.wxsid,
             'skey':self.skey,
             'pass_ticket':self.pass_ticket
         }
-        data = {
-            'BaseRequest':self.base_request,
+        json_params = {
+            'BaseRequest':{
+                'Skey':self.skey,
+                'Sid':self.wxsid,
+                'Uin':int(self.wxuin),
+                'DeviceID':self.device_id
+            },
             'SyncKey':self.sync_key,
             'rr':get_rtimestamp()
         }
-        headers = {
-            'ContentType':'application/json; charset=UTF-8',
-            'User-Agent':self.headers['User-Agent']
-        }
-        resp = self.session.post(url, params=params, data=json.dumps(data), headers=headers, proxies=self.proxies)
+        resp = self.session.post(url, params=params, json=json_params)
         resp.encoding = 'utf-8'
         dic = json.loads(resp.text)
         if dic['BaseResponse']['Ret'] == 0:
@@ -390,6 +387,8 @@ class webwx:
                 parsed_msg['encryFileName'] = msg['EncryFileName']
                 parsed_msg['fileSize'] = msg['FileSize']
                 parsed_msg['downloadFunc'] = self.__file_download
+        elif msg_type == 51: # status notify
+             parsed_msg['statusNotifyCode'] = msg['StatusNotifyCode']
         elif msg_type == 10002: # revoke
             parsed_msg['msgType'] = 'REVOKE'
             parsed_msg['revokedMsgId'] = re.search('&lt;msgid&gt;(.*?)&lt;', msg['Content']).group(1)
@@ -402,7 +401,7 @@ class webwx:
     def __img_download(self, msg):
         media_id = msg['mediaId']
         url = 'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxgetmsgimg?MsgID=%s&skey=%s'%(media_id, self.skey)
-        resp = self.session.get(url, stream=True, headers=self.headers, proxies=self.proxies)
+        resp = self.session.get(url, stream=True)
         file_name = 'img_' + media_id + '.jpg'
         with open(file_name, 'wb') as fptr:
             fptr.write(resp.content)
@@ -411,7 +410,7 @@ class webwx:
     def __voice_download(self, msg):
         media_id = msg['mediaId']
         url = 'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxgetvoice?msgID=%s&skey=%s'%(media_id, self.skey)
-        resp = self.session.get(url, stream=True, headers=self.headers, proxies=self.proxies)
+        resp = self.session.get(url, stream=True)
         file_name = 'voice_' + media_id + '.mp3'
         with open(file_name, 'wb') as fptr:
             fptr.write(resp.content)
@@ -422,9 +421,8 @@ class webwx:
         url = 'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxgetvideo?msgID=%s&skey=%s'%(media_id, self.skey)
         headers = {
             'Range':'bytes=0-',
-            'User-Agent':self.headers['User-Agent']
         }
-        resp = self.session.get(url, stream=True, headers=headers, proxies=self.proxies)
+        resp = self.session.get(url, stream=True, headers=headers)
         file_name = 'video_' + media_id + '.mp4'
         with open(file_name, 'wb') as fptr:
             fptr.write(resp.content)
@@ -436,11 +434,11 @@ class webwx:
             'sender':msg['senderName'],
             'mediaid':msg['mediaId'],
             'encryfilename':msg['encryFileName'],
-            'fromuser':self.uin,
+            'fromuser':self.wxuin,
             'pass_ticket':self.pass_ticket,
             'webwx_data_ticket':self.session.cookies['webwx_data_ticket']
         }
-        resp = self.session.get(url, params=params, stream=True, headers=self.headers, proxies=self.proxies)
+        resp = self.session.get(url, params=params, stream=True)
         with open(msg['fileName'], 'wb') as fptr:
             fptr.write(resp.content)
         print('download file success:%s' %msg['fileName'])
@@ -448,11 +446,10 @@ class webwx:
     def __save_pickle(self):
         conf = {
             'skey':self.skey,
-            'sid':self.sid,
-            'uin':self.uin,
+            'wxsid':self.wxsid,
+            'wxuin':self.wxuin,
             'pass_ticket':self.pass_ticket,
             'device_id':self.device_id,
-            'base_request':self.base_request,
             'sync_key':self.sync_key,
             'sync_key_str':self.sync_key_str,
             'account_self':self.account_self,
@@ -463,21 +460,20 @@ class webwx:
             'cookies':self.session.cookies.get_dict()
         }
 
-        with open(self.filename_pickle, 'wb') as fptr:
-            fptr.truncate() # clean file
-            pickle.dump(conf, fptr)
+        with open(self.filename_pickle, 'wb') as f:
+            f.truncate() # clean file
+            pickle.dump(conf, f)
 
     def __load_pickle(self):
         if os.path.exists(self.filename_pickle):
-            with open(self.filename_pickle, 'rb') as fptr:
-                conf = pickle.load(fptr)
+            with open(self.filename_pickle, 'rb') as f:
+                conf = pickle.load(f)
 
             self.skey = conf['skey']
-            self.sid = conf['sid']
-            self.uin = conf['uin']
+            self.wxsid = conf['wxsid']
+            self.wxuin = conf['wxuin']
             self.pass_ticket = conf['pass_ticket']
             self.device_id = conf['device_id']
-            self.base_request = conf['base_request']
             self.sync_key = conf['sync_key']
             self.sync_key_str = conf['sync_key_str']
             self.account_self = conf['account_self']
@@ -519,7 +515,12 @@ class webwx:
             'mediatype':(None, media_type),
             'uploadmediarequest':(None, json.dumps({
                 'UploadType':2,
-                'BaseRequest':self.base_request,
+                'BaseRequest':{
+                    'Skey':self.skey,
+                    'Sid':self.wxsid,
+                    'Uin':int(self.wxuin),
+                    'DeviceID':self.device_id
+                },
                 'ClientMediaId':get_msgid(),
                 'TotalLen':str(file_len),
                 'StartPos':0,
@@ -541,11 +542,11 @@ class webwx:
                 files['chunks'] = (None, str(chunks))
                 files['chunk'] = (None, str(chunk))
                 files['filename'] = (os.path.basename(file_name), f_bytes, file_type.split('/')[1])
-                resp = self.session.post(url, files=files, headers=self.headers, proxies=self.proxies)
+                resp = self.session.post(url, files=files)
         else:
             f_bytes = fptr.read(1 << 19)
             files['filename'] = (os.path.basename(file_name), f_bytes, file_type.split('/')[1])
-            resp = self.session.post(url, files=files, headers=self.headers, proxies=self.proxies)
+            resp = self.session.post(url, files=files)
         dic = json.loads(resp.text)
         fptr.close()
         self.index_upload_file += 1
@@ -562,8 +563,13 @@ class webwx:
 
         msg_id = get_msgid()
         to_user_name = self.__get_username(receiver)
-        data = {
-            'BaseRequest':self.base_request,
+        json_params = {
+            'BaseRequest':{
+                'Skey':self.skey,
+                'Sid':self.wxsid,
+                'Uin':int(self.wxuin),
+                'DeviceID':self.device_id
+            },
             'Msg':{
                 'ClientMsgId':msg_id,
                 'FromUserName':self.account_self['UserName'],
@@ -576,27 +582,23 @@ class webwx:
         media_id = self.__upload_media(file_name, media_type, to_user_name)
 
         if media_type == 'pic':
-            data['Msg']['Content'] = ''
-            data['Msg']['MediaId'] = media_id
-            data['Msg']['Type'] = 3
+            json_params['Msg']['Content'] = ''
+            json_params['Msg']['MediaId'] = media_id
+            json_params['Msg']['Type'] = 3
         elif media_type == 'video':
-            data['Msg']['Content'] = ''
-            data['Msg']['MediaId'] = media_id
-            data['Msg']['Type'] = 43
+            json_params['Msg']['Content'] = ''
+            json_params['Msg']['MediaId'] = media_id
+            json_params['Msg']['Type'] = 43
         elif media_type == 'doc':
             file_len = os.path.getsize(file_name)
             content = ("<appmsg appid='wxeb7ec651dd0aefa9' sdkver=''><title>%s</title>" % os.path.basename(file_name) +
                 "<des></des><action></action><type>6</type><content></content><url></url><lowurl></lowurl>" +
                 "<appattach><totallen>%s</totallen><attachid>%s</attachid>" % (str(file_len), media_id) +
                 "<fileext>%s</fileext></appattach><extinfo></extinfo></appmsg>" % os.path.splitext(file_name)[1].replace('.', ''))
-            data['Msg']['Content'] = content
-            data['Msg']['Type'] = 6
+            json_params['Msg']['Content'] = content
+            json_params['Msg']['Type'] = 6
 
-        headers = {
-            'ContentType':'application/json; charset=UTF-8',
-            'User-Agent':self.headers['User-Agent']
-        }
-        self.session.post(url, params=params, data=json.dumps(data), headers=headers, proxies=self.proxies)
+        self.session.post(url, params=params, json=json_params)
 
     def send_text(self, text, receiver):
         ''' send text to receiver, receiver can be msg['senderName']/nickname/remarkname '''
@@ -606,8 +608,13 @@ class webwx:
         }
         msg_id = get_msgid()
         to_username = self.__get_username(receiver)
-        data = {
-            'BaseRequest':self.base_request,
+        json_params = {
+            'BaseRequest':{
+                'Skey':self.skey,
+                'Sid':self.wxsid,
+                'Uin':int(self.wxuin),
+                'DeviceID':self.device_id
+            },
             'Msg':{
                 "ClientMsgId":msg_id,
                 "Content":text,
@@ -618,11 +625,7 @@ class webwx:
             },
             'Scene':0
         }
-        headers = {
-            'ContentType':'application/json; charset=UTF-8',
-            'User-Agent':self.headers['User-Agent']
-        }
-        self.session.post(url, params=params, data=json.dumps(data, ensure_ascii=False).encode('utf8'), headers=headers, proxies=self.proxies)
+        self.session.post(url, params=params, json=json_params)
 
     def send_image(self, file_name, receiver):
         ''' send image to receiver, receiver can be msg['senderName']/nickname/remarkname '''
@@ -667,15 +670,10 @@ class webwx:
             'skey':self.skey
         }
         data = {
-            'sid':self.sid,
-            'uin':self.uin
+            'sid':self.wxsid,
+            'uin':self.wxuin
         }
-        headers = {
-            'ContentType':'application/json; charset=UTF-8',
-            'User-Agent':self.headers['User-Agent']
-        }
-        self.session.post(url, params=params, data=json.dumps(data), headers=headers, proxies=self.proxies)
-
+        self.session.post(url, params=params, data=data)
         self.__delete_pickle()
         print('logout success')
 
@@ -705,7 +703,7 @@ class webwx:
 
                         if handle_enable:
                             self.__handle_msg(parsed_msg)
-            elif retcode == '1101': # logout by phone
+            elif retcode == '1101' or retcode == '1102': # logout by phone
                 self.__delete_pickle()
                 print('logout success')
                 return
