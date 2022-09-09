@@ -388,7 +388,20 @@ class webwx:
                 parsed_msg['fileSize'] = msg['FileSize']
                 parsed_msg['downloadFunc'] = self.__file_download
         elif msg_type == 51: # status notify
-             parsed_msg['statusNotifyCode'] = msg['StatusNotifyCode']
+            parsed_msg['msgType'] = 'STATUSNOTIFY'
+            parsed_msg['statusNotifyCode'] = msg['StatusNotifyCode']
+            if msg['StatusNotifyCode'] == 1:
+                parsed_msg['statusNotifyMsg'] = 'readed'
+            elif msg['StatusNotifyCode'] == 2:
+                parsed_msg['statusNotifyMsg'] = 'enter_session'
+            elif msg['StatusNotifyCode'] == 3:
+                parsed_msg['statusNotifyMsg'] = 'inited'
+            elif msg['StatusNotifyCode'] == 4:
+                parsed_msg['statusNotifyMsg'] = 'sync'
+            elif msg['StatusNotifyCode'] == 5:
+                parsed_msg['statusNotifyMsg'] = 'quit_session'
+            else:
+                parsed_msg['statusNotifyMsg'] = 'unknown'
         elif msg_type == 10002: # revoke
             parsed_msg['msgType'] = 'REVOKE'
             parsed_msg['revokedMsgId'] = re.search('&lt;msgid&gt;(.*?)&lt;', msg['Content']).group(1)
